@@ -1,0 +1,110 @@
+buildscript {
+    ext {
+        springBootVersion = '1.3.2.RELEASE'
+    }
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'groovy'
+
+apply plugin: 'spring-boot'
+
+archivesBaseName = 'card-service'
+
+group = 'main'
+version = '0.1.0'
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+
+task writeCloudFoundryManifest(type: Copy) {
+    from 'cloud-foundry'
+    into "${buildDir}"
+    include 'manifest.yml.template'
+    rename { file -> 'manifest.yml' }
+    expand([
+            stormpath_apiKey_id: "$System.env.stormpath_apiKey_id",
+            stormpath_apiKey_secret: "$System.env.stormpath_apiKey_secret",
+            stormpath_application_href: "$System.env.stormpath_application_href",
+            deployment_environment: "$System.env.deployment_environment",
+            security_user_password: "$System.env.security_user_password"
+    ])
+}
+
+task cfPush(dependsOn:[], type:Exec){
+    commandLine "cf","push","-f","${buildDir}/manifest.yml"
+}
+
+task setCloudFoundryApi(dependsOn:[], type:Exec){
+    commandLine "cf","api","https://api.run.pivotal.io"
+}
+
+task loginToCloudFoundry(dependsOn:[setCloudFoundryApi], type:Exec){
+    commandLine "cf","auth","$System.env.CF_USER" ,"$System.env.CF_PASS"
+}
+
+
+task targetCloudFoundrySpace(dependsOn:[loginToCloudFoundry], type:Exec){
+    commandLine "cf","target","-o", "$System.env.CF_ORG", "-s", "$System.env.CF_SPACE"
+}
+
+task unbindPapertrailService(dependsOn:[targetCloudFoundrySpace], type:Exec){
+    commandLine "cf","unbind-service", "archive-card-service-2-${System.env.CF_SPACE}",  "kanban-now-papertrail-logs-${System.env.CF_SPACE}"
+}
+
+
+task deletePapertrailService(dependsOn:[targetCloudFoundrySpace,unbindPapertrailService], type:Exec){
+    commandLine "cf","delete-service", "kanban-now-papertrail-logs-${System.env.CF_SPACE}", "-f"
+}
+
+
+task deleteAndCreatePapertrailService(dependsOn:[targetCloudFoundrySpace,deletePapertrailService], type:Exec){
+    commandLine "cf","cups","kanban-now-papertrail-logs-${System.env.CF_SPACE}", "-l", "$System.env.papertrail_url"
+}
+
+task createPapertrailService(dependsOn:[targetCloudFoundrySpace], type:Exec){
+    commandLine "cf","cups","kanban-now-papertrail-logs-${System.env.CF_SPACE}", "-l", "$System.env.papertrail_url"
+}
+
+
+dependencies {
+    compile 'com.stormpath.spring:stormpath-default-spring-boot-starter:1.0.RC8.3'
+
+    compile('org.springframework.boot:spring-boot-starter-jdbc')
+    compile "org.springframework.boot:spring-boot-starter-jersey"
+
+    compile "org.springframework.boot:spring-boot-starter-actuator"
+
+    compile "postgresql:postgresql:9.0-801.jdbc4"
+    compile "org.liquibase:liquibase-core"
+    compile 'org.projectlombok:lombok:1.16.6'
+
+
+
+    testCompile group: 'org.codehaus.groovy', name: 'groovy-all', version: '2.4.5'
+    testCompile('org.springframework.boot:spring-boot-starter-test')
+
+
+    testCompile group: 'org.codehaus.groovy.modules.http-builder', name: 'http-builder', version: '0.7.1'
+
+    testCompile ('org.spockframework:spock-spring:1.0-groovy-2.4') {
+        exclude group: 'org.codehaus.groovy'
+    }
+
+    testCompile 'com.netflix.feign:feign-core:8.15.0'
+    testCompile 'com.netflix.feign:feign-gson:8.15.0'
+
+}
+
